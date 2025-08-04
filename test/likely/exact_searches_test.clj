@@ -1,22 +1,33 @@
 (ns likely.exact-searches-test
   (:require [clojure.test :refer  [deftest is]]
-            [likely.testdata :as testdata]
             [likely.exact-searches :as exact]))
 
+(def refdata {"daam" #{3},
+	 "nilsson" #{5},
+	 "adam" #{1 6},
+	 "nilsonn" #{6},
+	 "aadm" #{2},
+	 "morgan" #{4},
+	 "marianne" #{5},
+	 "nilssson" #{3},
+	 "bertilson" #{2},
+	 "bertilsson" #{1},
+	 "bedrup" #{4}})
+
 (deftest find-exact
-  (is (= (set ["morgan"]) 
-         (exact/find-exact "morgan" (:ref testdata/m )))))
+  (is (=  {"morgan" #{4}}
+          (exact/find-exact "morgan" refdata))))
 
 (deftest find-starts-with
-  (is (= ["morgan"]
-         (exact/find-starts-with "morg" (:ref testdata/m))))
-  (is (nil? (exact/find-starts-with "mor" (:ref testdata/m)))))
+  (is (=  {"morgan" #{4}}
+          (exact/find-starts-with "morg" refdata)))
+  (is (nil? (exact/find-starts-with "mor" refdata))))
 
 (deftest find-contains
-  (is (= (set ["bertilsson", "nilsson"])
-         (set  (exact/find-contains "ilsson" (:ref testdata/m)))))
+  (is (=  {"bertilsson" #{1} "nilsson" #{5}}
+          (exact/find-contains "ilsson" refdata)))
   (is (nil?
-       (exact/find-contains "sson" (:ref testdata/m)))))
+       (exact/find-contains "sson" refdata))))
 
 (deftest not-too-long
   (is ((exact/not-too-long-pred 3) "1234"))

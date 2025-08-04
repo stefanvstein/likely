@@ -70,6 +70,23 @@
    {}
    data-set))
 
+(comment
+  (let [data [{:key 1, :a "Adam" :b "Bertilsson"}
+              {:key 2, :a "Aadm" :b "Bertilson"}
+              {:key 3, :a "Daam" :b "Nilssson"}
+              {:key 4, :a "Morgan" :b "Bedrup ab"}
+              {:key 5, :a "Marianne" :b "Nilsson"}
+              {:key 6, :a "Adam" :b "Nilsonn"}]]
+
+    (create-data-from-resultset data
+                                :key
+                                ;[(fn [a] (or (:a a) (:b a)))]
+                                        [:a :b]
+                                [(complement #{"ab" "as" "gmbh"})]
+                                #(vector (:a %) (:b %))))
+                                        ;
+  )
+
 (defn sentences [s]
   (let [bi (BreakIterator/getSentenceInstance)
         f (fn [start res]
@@ -79,6 +96,10 @@
                 (recur end (conj res (.trim (.substring s start end)))))))]
     (.setText bi s)
     (f (.first bi) [])))
+
+(comment
+  (= ["I am." "You are, not!" "I will"]
+     (sentences "I am. You are, not! I will")))
 
 (defn create-data-from-sentences [text include-preds]
   (let [as-sentence-map (fn [x i] {:text x :key i})]
