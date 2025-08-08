@@ -5,6 +5,8 @@
             [likely.normalize :refer [normalize-accents]]))
 
 
+
+
 (defn- get-codex-letters [pword]
   (let [last-3 (min 3 (- (count pword) 3))]
     (apply str (concat (take 3 pword)

@@ -3,17 +3,13 @@
             [likely.distance-searches :as distance]
             [likely.exact-searches :as exact]
             [likely.strings :as strings]
-            [clojure.string :as str]))
+         ))
 
 
 (defn words [s]
   (-> (when (string? s)
         (strings/split-spaces s))
-      (set)
-      ;;Ska det ske nån filtrering här? Förmodligen inte
-      ))
-
-
+      (set)))
 
 (defn comp-by-keys [& ks]
         (if (empty? ks)
@@ -54,7 +50,7 @@
    {:algo :fonetic :query word :points 10}
    {:algo :start-distance :query word :length 1 :points 3}
    {:algo :fonetic-distance :query word :length 1 :points 1}
-   {:algo :start-with-fonetic :query word :points 0}
+   {:algo :start-with-fonetic :query word :points 9}
    {:algo :contains :query word :min-word-length 5 :min-match-word-length 7 :points 150}
 {:algo :contains :query word :min-word-length 4 :min-match-word-length 5 :points 100}])
 
@@ -71,20 +67,26 @@
 
 #_(
   (searches  "ya gola"))
+(defmacro t
+  [msg expr]
+  `(let [start# (. System (currentTimeMillis))
+         ret# ~expr]
+     (println (str ~msg " in : "  (- (. System (currentTimeMillis)) start#) " msecs"))
+     ret#))
 
 (defn search-with-spec [{:keys [algo query length min-word-length min-match-word-length] :as _search-spec}
                         {:keys [ref mra] :as _data}]
-   (condp = algo
-       :exact (exact/find-exact query ref)
-       :exact-start  (exact/find-starts-with query ref)
-       :distance (distance/find-with-distance query length ref)
-       :fonetic (fonetic/find-fonetic query mra ref)
-       :start-distance (distance/find-starts-with-distance query length ref)
-       :fonetic-distance (fonetic/find-fonetic-distance query length mra ref)
-       :start-with-fonetic (fonetic/find-starts-with-fonetic query mra ref)
-       :contains (exact/find-contains query ref min-word-length min-match-word-length)
-       nil)
-  )
+  (t (str algo " " query)
+        (condp = algo
+          :exact (exact/find-exact query ref)
+          :exact-start (exact/find-starts-with query ref)
+          :distance (distance/find-with-distance query length ref)
+          :fonetic (fonetic/find-fonetic query mra ref)
+          :start-distance (distance/find-starts-with-distance query length ref)
+          :fonetic-distance (fonetic/find-fonetic-distance query length mra ref)
+          :start-with-fonetic (fonetic/find-starts-with-fonetic query mra ref)
+          :contains (exact/find-contains query ref min-word-length min-match-word-length)
+          nil)))
 
 (defn update-when-greater-points
   "update value of k in m when v is greater than value of k, or k does not exist"
@@ -133,23 +135,23 @@
 
 (defn update-extra-for-common [m points]
   (let [extras (words-with-common-group (keys m) (fn [k] (:refs (m k))))]
-    (println "Extras:" extras)
+    
     (reduce (fn [a v]
               (update a v #(assoc % :points (+ points (:points % 0)))))
             m
             extras)))
-(defn- do-search [question data]
+(defn- do-search [data question]
   (let [s (searches question)]
     (perform-searches s data)))
 
-(defn search [question data]
+(defn search [data question]
   (let [
-        r (do-search question data)
+        r (do-search data question)
         
         ;; Hmm give extra points fort those that have same ref
         
         with-extra (update-extra-for-common r 1)
-        _ (clojure.pprint/pprint with-extra)
+        
         a (as-value-and-points with-extra)
         ]
     (map :value a)
@@ -157,13 +159,13 @@
 
 
 (comment
-  (search "tilson morgan" testdata)
-  (search "bertil" testdata)
+  (search testdata "tilson morgan" )
+  (search testdata "bertil" )
   (require '[likely.mra :as mra])
   (mra/mra-codex "bertil")
   (mra/mra-codex "bertol")
-  (search "bertol" testdata)
-  (search "adim" testdata)
+  (search testdata "bertol")
+  (search testdata "adim")
                                         ;**************
   (def testresult
     {"nilsonn" {:algo :start-distance, :query "tilson", :length 1, :points 3},

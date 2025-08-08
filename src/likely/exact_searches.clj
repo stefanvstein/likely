@@ -21,13 +21,14 @@
          (not-empty))))
 
 (defn find-starts-with [string words]
-  (if (map? words)
-    (->> (starts-with string (keys words))
-         (select-keys words)
-         (not-empty)
-         strings/text-map)
-    (-> (starts-with string words)
-        strings/text-set)))
+  (when (not-empty string)
+    (if (map? words)
+      (->> (starts-with string (keys words))
+           (select-keys words)
+           (not-empty)
+           strings/text-map)
+      (-> (starts-with string words)
+          strings/text-set))))
 
 (comment
   (find-starts-with "oll" {"olle" {2 3}}))
