@@ -12,6 +12,26 @@
 (defonce ^:private *frame (atom nil))
 (import '[java.awt Font])
 
+(def debug-area (doto (JTextArea.)
+                  (.setEditable false)
+                  (.setLineWrap true)
+                  (.setWrapStyleWord true)))
+
+(defn append-debug
+  [^String text]
+  (SwingUtilities/invokeLater #((.append debug-area (str text "\n"))
+                                (.setCaretPosition debug-area (.getLenght (.getDocument debug-area))))))
+
+(defmacro with-stdout
+
+  [& body]
+  `(let [s# (new java.io.StringWriter)]
+     (binding [*out* s#]
+       (let [a# (do ~@body)]
+         [a# (str s#)]))))
+
+(with-stdout (println "Hej") (+ 4 5) (println "Hå") 4)
+
 (def search-field (JTextField.))
 (def default-font (.getFont search-field))
 (def larger-font (Font. (.getName default-font) Font/PLAIN (+ 4 (.getSize default-font))))
@@ -108,7 +128,7 @@
        (book/deduped-paragraphs-sorted-by-matches
         [:book :chapter :paragraph]
         words)
-       (map :text)))
+       (map #(str (:book %) " - " (:chapter %) ":\n" (:text %)))))
 
 (def middle-set
   (let [a (atom [])]
@@ -143,8 +163,30 @@
     (.add  (javax.swing.JLabel. "Selected words:") BorderLayout/NORTH)
     (.add  middle-scroll BorderLayout/CENTER)))
 
+(defn update-left [words]
+  (.clear left-list-model)
+  (doseq [w words]
+    (.addElement left-list-model w)))
+
+;(def current-search (atom nil))
+
 (defn get-words [text]
-  (book/search text))
+  (let [[r s] (with-stdout
+                         (book/search text))]
+             (append-debug s)
+             (update-left r))
+  #_(swap! current-search
+           (fn [s]
+             (if s
+               text)
+             (let [[r s] (with-stdout
+                           (book/search text))]
+               (append-debug s)
+               (update-left r))))
+  )
+
+
+
 
 (defn create-ui []
   (let [frame (JFrame. "Sök för i helvete")
@@ -152,10 +194,7 @@
                (.setPreferredSize (Dimension. 800 600)))
         ;;{:keys [right zebra]} (make-zebra-panel)
         {:keys [component]} (make-zebra-jlist zebra-model)
-        debug-area (doto (JTextArea.)
-                     (.setEditable false)
-                     (.setLineWrap true)
-                     (.setWrapStyleWord true))
+       
         debug-scroll (JScrollPane. debug-area)
         leftsplit (JSplitPane. JSplitPane/HORIZONTAL_SPLIT left-panel middle-panel)
         rightsplit (JSplitPane. JSplitPane/HORIZONTAL_SPLIT leftsplit component)
@@ -168,32 +207,27 @@
     (.add root search-panel BorderLayout/NORTH)
     (.add root allSplit  BorderLayout/CENTER)
 
-    (import '[javax.swing ])
-
-(.setBorder search-panel (BorderFactory/createEmptyBorder 5 5 10 5))
-(.setBorder left-panel   (BorderFactory/createEmptyBorder 5 0 0 0))
-(.setBorder middle-panel (BorderFactory/createEmptyBorder 5 0 0 0))
-(.setBorder root (BorderFactory/createEmptyBorder 5 5 5 5))
+    (.setBorder search-panel (BorderFactory/createEmptyBorder 5 5 10 5))
+    (.setBorder left-panel   (BorderFactory/createEmptyBorder 5 0 0 0))
+    (.setBorder middle-panel (BorderFactory/createEmptyBorder 5 0 0 0))
+    (.setBorder root (BorderFactory/createEmptyBorder 5 5 5 5))
 
 
 
-(.setFont left-list larger-font)
-(.setFont middle-list larger-font)
-(.setFont search-field larger-font) ; redundant, men tydligt
+    (.setFont left-list larger-font)
+    (.setFont middle-list larger-font)
+    (.setFont search-field larger-font) ; redundant, men tydligt
 
-(doto (.getDocument search-field)
-  (.addDocumentListener
-   (proxy [javax.swing.event.DocumentListener] []
-     (insertUpdate [_]
-       (let [text (.getText search-field)
-             words (get-words text)]
-         (println "text:" text)
-         (println "top 5 words:" (take 5 words))
-         (.clear left-list-model)
-         (doseq [w words]
-           (.addElement left-list-model w))))
-     (removeUpdate [e] (.insertUpdate this e))
-     (changedUpdate [_]))))
+    (doto (.getDocument search-field)
+      (.addDocumentListener
+       (proxy [javax.swing.event.DocumentListener] []
+         (insertUpdate [_]
+           (let [text (.getText search-field)
+                 ]
+             (get-words text)
+             #_(update-left words)))
+         (removeUpdate [e] (.insertUpdate this e))
+         (changedUpdate [_]))))
 
     (let [add-selected
           (fn []

@@ -52,8 +52,65 @@
   (string/replace s #"\n" " ")
 )
 
+(defn clean-text [s]
+  (-> s
+      (str/replace #"\s+" " ")
+      str/trim))
+
+#_(defn extract-paragraphs [hick]
+  (let [title (title hick)
+        segments (:content (body-node hick))]
+    (->> segments
+         (filter #(and (map? %)
+                       (= (:tag %) :p)
+                       (not (empty? (:content %)))))
+         (map #(->> (flatten-text %)
+                    clean-text))
+         (remove str/blank?)
+         (map-indexed (fn [i txt]
+                        {:chapter title
+                         :paragraph i
+                         :text txt}))
+         vec)))
 
 (defn extract-paragraphs [hick]
+  (let [title (title hick)
+        body (body-node hick)
+        ;; Hitta alla p-taggar i hela body-trädet
+        all-paragraphs (->> (tree-seq map? :content body)
+                            (filter #(= (:tag %) :p))
+                            (filter #(not (empty? (:content %)))))
+        ;; Om du vill: ta även bort tomma strängar i p-taggar
+        ]
+    (->> all-paragraphs
+         (map #(->> (flatten-text %)
+                    clean-text))
+         (remove str/blank?)
+         (map-indexed (fn [i txt]
+                        {:chapter title
+                         :paragraph i
+                         :text txt}))
+         vec)))
+
+
+#_(defn extract-paragraphs [hick]
+    (let [title (title hick)
+          segments (:content (body-node hick))
+          cleaned (remove #(and (map? %) (= (:tag %) :h2)) segments)
+          paragraph-groups (partition-by is-empty-paragraph? cleaned)
+          text-groups (remove #(is-empty-paragraph? (first %)) paragraph-groups)]
+
+      (->> text-groups
+           (map #(->> (map flatten-text %)
+                      (apply str)
+                      clojure.string/trim
+                      replaceline-with-space)
+                )
+           (remove clojure.string/blank?)
+           (map #(do {:chapter title :text %2 :paragraph %1}) (range))
+           vec)))
+
+#_(defn extract-paragraphs [hick]
   (let [title (title hick)
         segments (:content (body-node hick))
         cleaned (remove #(and (map? %) (= (:tag %) :h2)) segments)
@@ -70,8 +127,9 @@
          (map #(do {:chapter title :text %2 :paragraph %1}) (range))
          vec)))
 
-(defn path [dir]
-  (Paths/get dir (make-array String 0)))
+(defn path [dir & steps]
+  (Paths/get dir (into-array String steps)))
+
 
 (defn stream-to-list [s]
   (.collect s (Collectors/toList)))
@@ -84,7 +142,8 @@
         files (stream-to-list (Files/list path))]
     (->> files
          (filter #(and (regular-file? %)
-                       (.endsWith (str %) ".xhtml")))
+                       (or (.endsWith (str %) ".xhtml")
+                           (.endsWith (str %) ".html"))))
          (map str)
          (sort)
          vec)))
@@ -111,10 +170,11 @@
           m
           (:tokens entry)))
 
-(defn- make-ref-map [entries skips]
+(defn- make-ref-map [entries skips name]
   (->> entries
-       
-       (map #(assoc % :tokens (tokenize (:text %) skips)))
+       (map #(assoc %
+                    :tokens (tokenize (:text %) skips)
+                    :book name))
        (reduce update-tokens {})))
 
 (defn- mra-words [words]
@@ -126,13 +186,38 @@
                     a (mra/mra-codex v)))
           {} words))
 
-(defn- parse-book []
-  (->> (list-xhtml-files "book")
-       (mapcat #(->> (slurp %)
-                     hickory/parse
-                     hickory/as-hickory
-                     extract-paragraphs
-                     ))
+(defn- parse-file [file]
+  (->> (slurp file)
+       hickory/parse
+       hickory/as-hickory
+       extract-paragraphs))
+
+(comment
+  #_(for [x (range 37 38)]
+      (spit (str x ".xhtml") (with-out-str
+                               (let [title (str "Chapter " (- x 1))]
+                                 (println (str "<?xml version=\"1.0\" encoding=\"utf-8\"?>
+<!DOCTYPE html PUBLIC \"-//W3C//DTD XHTML 1.1//EN\"
+  \"http://www.w3.org/TR/xhtml11/DTD/xhtml11.dtd\">
+
+<html xmlns=\"http://www.w3.org/1999/xhtml\">
+<head>
+  <title>" title "</title>
+</head>
+
+<body>"))
+                                 (doseq [a (->> (parse-file (str "The Hitchhiker's Guide to the Galaxy/Section00" x ".xhtml"))
+                                                (map #(str "<p>" (:text %) "</p>")))]
+                                   (println a))
+                                 (println "</body></html>")))))
+
+  (parse-file "Pride and Prejudice/Austen_Jane_Pride_and_Prejudice-5.html")
+  (parse-file "Alice in Wonderland/1884162634288874370_11-h-1.htm.xhtml")
+                                        ;
+  )
+(defn- parse-book [directory]
+  (->> (list-xhtml-files directory)
+       (mapcat parse-file)
        vec))
 
 
@@ -140,26 +225,49 @@
   (let [a (with-out-str (clojure.pprint/pprint events))]
     (spit "book.edn" a)))
 
-(defn load-skips []
-  (if (regular-file? (path "book/skip.edn"))
-    (set (edn/read-string (slurp "book/skip.edn")))
-    #{}))
+(defn load-skips [book]
+  (let [file (path book "skip.edn")]
+    (if (regular-file? file)
+      (set (edn/read-string (slurp (str file))))
+      #{})))
 
-(defn- load-book []
-  (println "Loading book")
-  (let [paragraphs (parse-book)
-        skips (load-skips)
-        ref (time "make ref" (make-ref-map paragraphs skips))
+(defn- load-book [book]
+  
+  (let [
+        _ (println "Readin " book)
+        paragraphs (parse-book book)
+        skips (load-skips book)
+        ref (time "make ref" (make-ref-map paragraphs skips book))
         mra (time "make mra" (mra-words (keys ref)))]
     (println "Done")
+    
     {:ref ref :mra mra }))
+
+(comment (load-book "The Hitchhiker's Guide to the Galaxy"))
+
+(defn merge-books [books]
+  (reduce (fn [a book]
+            (-> a
+                (update :ref #(merge-with into % (:ref book)))
+                (update :mra #(merge-with into % (:mra book)))))
+          {}
+          books))
+(defn load-books []
+  (->> ["The Hitchhiker's Guide to the Galaxy"
+        "Alice in Wonderland"
+        "In Freedoms Cause"]
+       (map load-book)
+       (merge-books)))
+
+(comment
+  (count  (parse-book "In Freedoms Cause")))
 
 (defn- book []
   (or @book*
-      (reset! book* (load-book))))
+      (reset! book* (load-books))))
 
 (defn- reload-book []
-  (reset! book* (load-book))
+  (reset! book* (load-books))
   nil)
 
 (defn search [q]
@@ -204,7 +312,8 @@
        (map (fn [[a b]] [a (count b)]))
        (take 100))
   (refs "zaphod")
-  (store-parsed-book (parse-book))
+  (reset! book* nil)
+                                        ;(store-parsed-book (parse-book))
   (reload-book)
   (spit "dump.edn" (with-out-str (clojure.pprint/pprint (book))))
   (search "")
@@ -212,6 +321,6 @@
   (mra/mra-codex "planet’s")
   (let [a (time "slurp book" (edn/read-string (slurp "book.edn")))]
     nil)
-  (let [a (time "parse book" (parse-book))] nil)
-  (let [a  (load-book)] nil)
+  ;(let [a (time "parse book" (parse-book))] nil)
+  
   ((set (keys (:ref (book)))) ""))
