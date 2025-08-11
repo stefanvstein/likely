@@ -6,17 +6,59 @@
             [clojure.string :as str]
             [likely.mra :as mra]
             [likely.search :as search]
+            [clojure.java.io :as io]
+
             clojure.pprint)
 
-  (:import [java.nio.file Files Paths LinkOption]
-           [java.util.stream Collectors]))
+  (:import [java.nio.file Files Paths LinkOption StandardCopyOption OpenOption]
+           [java.io File]
+           [java.util.stream Collectors]
+           [java.util.zip ZipInputStream ZipEntry]))
 
-(defmacro time
-  [msg expr]
+(defmacro clock
+  [msg print expr ]
   `(let [start# (. System (currentTimeMillis))
          ret# ~expr]
-     (println (str ~msg " in : "  (- (. System (currentTimeMillis)) start#) " msecs"))
+     (~print (str ~msg " in : "  (- (. System (currentTimeMillis)) start#) " msecs"))
      ret#))
+
+
+
+(defn- unzip! [^java.nio.file.Path zip-path ^java.nio.file.Path target-dir]
+  (with-open [zis (ZipInputStream. (Files/newInputStream zip-path
+                                                         (make-array OpenOption 0)))]
+    (loop []
+      (when-let [^ZipEntry e (.getNextEntry zis)]
+        (let [out (-> target-dir (.resolve (.getName e)))]
+          (if (.isDirectory e)
+            (Files/createDirectories out (make-array java.nio.file.attribute.FileAttribute 0))
+            (do
+              (Files/createDirectories (.getParent out)
+                                       (make-array java.nio.file.attribute.FileAttribute 0))
+              (Files/copy zis out (make-array java.nio.file.CopyOption 0))))
+          (.closeEntry zis)
+          (recur))))))
+
+(defn ensure-books-dir!
+  "Packar upp resources/books.zip till systemets temp/mydemo-books
+   om det inte redan finns. Returnerar Path till katalogen."
+  [debug]
+  (let [tmp-root (Paths/get (System/getProperty "java.io.tmpdir")
+                            (into-array String ["clever-searching-books"]))
+
+        zip-tmp  (Paths/get (System/getProperty "java.io.tmpdir")
+                            (into-array String ["books.zip"]))]
+    (debug (str "book directory:" (str tmp-root)))
+    (when (not (Files/exists tmp-root
+                             (make-array LinkOption 0)))
+      (debug "There are no books. Extracting from binary..")
+      (Files/createDirectories tmp-root (make-array java.nio.file.attribute.FileAttribute 0))
+      (with-open [in (io/input-stream (io/resource "books.zip"))]
+        (Files/copy in zip-tmp (into-array java.nio.file.CopyOption
+                                           [StandardCopyOption/REPLACE_EXISTING])))
+      (unzip! zip-tmp tmp-root))
+    tmp-root))
+
 
 (defonce book* (atom nil))
 
@@ -231,19 +273,16 @@
       (set (edn/read-string (slurp (str file))))
       #{})))
 
-(defn- load-book [book]
-  
-  (let [
-        _ (println "Readin " book)
-        paragraphs (parse-book book)
+(defn- load-book
+  [bookdir book debug-print]
+  (let [_ (debug-print (str "Reading " book))
+        paragraphs (parse-book (str (File. bookdir book)))
         skips (load-skips book)
-        ref (time "make ref" (make-ref-map paragraphs skips book))
-        mra (time "make mra" (mra-words (keys ref)))]
-    (println "Done")
-    
-    {:ref ref :mra mra }))
+        ref (clock "make references" debug-print (make-ref-map paragraphs skips book))
+        mra (clock "make phonetics" debug-print (mra-words (keys ref)))]
 
-(comment (load-book "The Hitchhiker's Guide to the Galaxy"))
+    {:ref ref :mra mra}))
+
 
 (defn merge-books [books]
   (reduce (fn [a book]
@@ -252,32 +291,44 @@
                 (update :mra #(merge-with into % (:mra book)))))
           {}
           books))
-(defn load-books []
-  (->> ["The Hitchhiker's Guide to the Galaxy"
-        "Alice in Wonderland"
-        "In Freedoms Cause"]
-       (map load-book)
-       (merge-books)))
+
+(defn list-dirs [temp-dir]
+  (->> (.listFiles temp-dir)
+       (filter #(.isDirectory %))
+       (map #(.getName %))))
+
+(defn load-books
+  [debug-print]
+  (debug-print "Loading books!!")
+  (let [books-dir (File. (.toFile (ensure-books-dir! debug-print)) "books")]
+    (->> (list-dirs books-dir)
+         (map #(load-book books-dir % debug-print))
+         (merge-books))))
 
 (comment
   (count  (parse-book "In Freedoms Cause")))
 
-(defn- book []
+(defn book
+  
+  [debug]
   (or @book*
-      (reset! book* (load-books))))
+      (reset! book* (load-books debug))))
 
 (defn- reload-book []
-  (reset! book* (load-books))
+  (reset! book* (load-books println))
   nil)
 
-(defn search [q]
+(defn search [q debug]
   (println "Searching")
-  (let [r (search/search (book) q)]
+  (let [r (search/search (book debug) q)]
     (println "Done")
     r))
 
-(defn refs [word]
-  ((:ref (book)) word))
+(defn refs
+  ([word]
+   (refs word println))
+  ([word debug]
+   ((:ref (book debug)) word)))
 
 
 
@@ -308,19 +359,19 @@
    [{:chapter "1" :paragraph 1 :tokens ["zaphod" "ford" "trillian"]}
     {:chapter "1" :paragraph 2 :tokens ["marvin" "robot"]}
     {:chapter "1" :paragraph 3 :tokens ["zaphod" "marvin"]}])
-  (->> (sort-by #(- 0 (count (val %))) (:ref (book)))
+  (->> (sort-by #(- 0 (count (val %))) (:ref (book println)))
        (map (fn [[a b]] [a (count b)]))
        (take 100))
-  (refs "zaphod")
+  (refs "zaphod" println)
   (reset! book* nil)
                                         ;(store-parsed-book (parse-book))
   (reload-book)
-  (spit "dump.edn" (with-out-str (clojure.pprint/pprint (book))))
-  (search "")
-  (map :chapter (refs "arthur"))
+  (spit "dump.edn" (with-out-str (clojure.pprint/pprint (book println))))
+  (search "" println)
+  (map :chapter (refs "arthur" println))
   (mra/mra-codex "planet’s")
-  (let [a (time "slurp book" (edn/read-string (slurp "book.edn")))]
+  (let [a (clock "slurp book" println (edn/read-string (slurp "book.edn")))]
     nil)
   ;(let [a (time "parse book" (parse-book))] nil)
   
-  ((set (keys (:ref (book)))) ""))
+  ((set (keys (:ref (book println)))) ""))

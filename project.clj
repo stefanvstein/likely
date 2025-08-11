@@ -4,5 +4,6 @@
   :dependencies [[org.clojure/clojure "1.9.0"]
                  [org.clojure/math.combinatorics "0.1.4"]
                  [org.clj-commons/hickory "0.7.7"]
-                 ]
-  :java-source-paths ["java"])
+                 [org.clojure/core.async "1.6.681"]]
+  :java-source-paths ["java"]
+  :main likely.example.main)

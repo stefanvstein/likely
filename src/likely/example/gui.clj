@@ -1,5 +1,6 @@
 (ns likely.example.gui
   (:require [clojure.string]
+            [clojure.core.async :as a]
             [likely.example.book :as book])
   (:import [javax.swing JFrame JPanel JTextField JTextArea
             JList JScrollPane ListSelectionModel ListCellRenderer
@@ -10,17 +11,86 @@
            [java.awt.event MouseAdapter KeyAdapter]))
 
 (defonce ^:private *frame (atom nil))
-(import '[java.awt Font])
+
+
+
+;; Håll koll på vår enda kanal/worker
+(defonce ^:private search-ch* (atom nil))
+
+(defn ensure-search-worker!
+  "Startar en (1) worker om den inte redan finns.
+   apply-results! måste uppdatera GUI:t via EDT."
+  [apply-results! work]
+  (when (nil? @search-ch*)
+    (let [ch (a/chan (a/sliding-buffer 1))] ; behåll bara SENASTE
+      (reset! search-ch* ch)
+      (a/go-loop []
+        (when-let [q (a/<! ch)]
+          ;; Kör sökningen i bakgrundstråd (daemon)
+          (let [res (a/<! (a/thread (work q)))]
+            (apply-results! res))
+          (recur))))))
+
+(defn request-search!
+  "Kallas från din DocumentListener: skicka in nuvarande text."
+  [q apply-results! get-words]
+  (ensure-search-worker! apply-results! get-words)
+  (a/put! @search-ch* q))     ;; put! är icke-blockerande på GUI-tråden
+
+(defn stop-search-worker!
+  "Stäng ner snällt (t.ex. vid fönster-dispose)."
+  []
+  (when-let [ch @search-ch*]
+    (a/close! ch)
+    (reset! search-ch* nil)))
+
+;; Kör på EDT utan att blockera (ingen retur)
+(defn on-edt!
+  "Kör thunk på EDT; om vi redan är på EDT körs den direkt."
+  [thunk]                                  ; thunk är (fn [] ...)
+  (if (SwingUtilities/isEventDispatchThread)
+    (thunk)
+    (SwingUtilities/invokeLater ^Runnable thunk)))
+
+(defmacro EDT!
+  "Fire-and-forget på EDT."
+  [& body]
+  `(on-edt! (fn [] ~@body)))
+
+(defmacro EDT??
+  "Synkront på EDT, returnerar värdet."
+  [& body]
+  `(on-edt-sync (fn [] ~@body)))
+
+;; Kör på EDT och vänta (med returvärde)
+(defn on-edt-sync
+  "Kör thunk på EDT och returnera dess värde; blockar om vi inte är på EDT."
+  [thunk]
+  (if (SwingUtilities/isEventDispatchThread)
+    (thunk)
+    (let [result (promise)
+          error  (atom nil)]
+      (SwingUtilities/invokeAndWait
+       (proxy [Runnable] []
+         (run []
+           (try
+             (deliver result (thunk))
+             (catch Throwable t
+               (reset! error t))))))
+      (if @error (throw @error) @result))))
+
 
 (def debug-area (doto (JTextArea.)
                   (.setEditable false)
                   (.setLineWrap true)
                   (.setWrapStyleWord true)))
 
+
 (defn append-debug
   [^String text]
-  (SwingUtilities/invokeLater #((.append debug-area (str text "\n"))
-                                (.setCaretPosition debug-area (.getLenght (.getDocument debug-area))))))
+  (EDT!
+   (.append debug-area (str text "\n"))
+   (.setCaretPosition debug-area (.getLength (.getDocument debug-area)))))
 
 (defmacro with-stdout
 
@@ -135,8 +205,8 @@
     (add-watch
      a "key"
      (fn [_key _atom _old-state new-state]
-       (SwingUtilities/invokeLater
-        #(let [paragraphs (get-paragraphs new-state)] ;; Det här ska nog ske i en agent som updaterar listan efter sökning är klar
+       (EDT!
+        (let [paragraphs (get-paragraphs new-state)] ;; Det här ska nog ske i en agent som updaterar listan efter sökning är klar
            (.clear middle-list-model)
            (doseq [w new-state]
              (.addElement middle-list-model w))
@@ -164,13 +234,20 @@
     (.add  middle-scroll BorderLayout/CENTER)))
 
 (defn update-left [words]
-  (.clear left-list-model)
-  (doseq [w words]
-    (.addElement left-list-model w)))
+  (EDT!
+   (.clear left-list-model)
+   (doseq [w words]
+     (.addElement left-list-model w))))
 
-;(def current-search (atom nil))
+#_(Current search innehåller det senaste vi vill söka efter.
+           Ska vara nil om ingen sökning sker.
+           Om man vill söka efter något, så ersätter man, erästter man nil så söker man.
+           Om det man sökt efter inte längre står, så får man söka igen.
+           Sökning sker således i en egen tråd, som startas av den som inleder sökning, eftersom denna potentiellt kan få söka många gånger. 
+           )
 
-(defn get-words [text]
+
+#_(defn get-words [text]
   (let [[r s] (with-stdout
                          (book/search text))]
              (append-debug s)
@@ -181,15 +258,20 @@
                text)
              (let [[r s] (with-stdout
                            (book/search text))]
-               (append-debug s)
-               (update-left r))))
+               )))
   )
 
-
+(defn get-words [text]
+  (request-search! text
+                  (fn [[result debug-text]]
+                    (append-debug debug-text)
+                    (update-left result))
+                  (fn [text] (with-stdout
+                           (book/search text append-debug)))))
 
 
 (defn create-ui []
-  (let [frame (JFrame. "Sök för i helvete")
+  (let [frame (JFrame. "Clever search in books")
         root (doto (JPanel. (BorderLayout.))
                (.setPreferredSize (Dimension. 800 600)))
         ;;{:keys [right zebra]} (make-zebra-panel)
@@ -269,18 +351,19 @@
       (.setVisible true))))
 
 
-(defn -main []
-  (SwingUtilities/invokeLater create-ui))
+(defn main []
+  (EDT! (create-ui))
 
-(defn- create-ui-on-edt []
-  (when @*frame
-    (.dispose @*frame)) ; döda tidigare fönster snyggt
+  (book/book append-debug))
 
-  (reset! *frame (create-ui)))
+
 
 (defn new-ui []
-  (SwingUtilities/invokeLater
-    ^Runnable #(create-ui-on-edt)))
+  (EDT!
+   (when @*frame
+     (.dispose @*frame)) ; döda tidigare fönster snyggt
+   
+   (reset! *frame (create-ui))))
 
 (comment 
   (new-ui)
