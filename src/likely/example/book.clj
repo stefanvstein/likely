@@ -2,14 +2,12 @@
   (:require [hickory.core :as hickory]
             [clojure.string :as string]
             [clojure.edn :as edn]
+            [clojure.set :as set]
             [likely.strings :as strings]
-            [clojure.string :as str]
             [likely.mra :as mra]
             [likely.search :as search]
             [clojure.java.io :as io]
-
             clojure.pprint)
-
   (:import [java.nio.file Files Paths LinkOption StandardCopyOption OpenOption]
            [java.io File]
            [java.util.stream Collectors]
@@ -96,24 +94,10 @@
 
 (defn clean-text [s]
   (-> s
-      (str/replace #"\s+" " ")
-      str/trim))
+      (string/replace #"\s+" " ")
+      string/trim))
 
-#_(defn extract-paragraphs [hick]
-  (let [title (title hick)
-        segments (:content (body-node hick))]
-    (->> segments
-         (filter #(and (map? %)
-                       (= (:tag %) :p)
-                       (not (empty? (:content %)))))
-         (map #(->> (flatten-text %)
-                    clean-text))
-         (remove str/blank?)
-         (map-indexed (fn [i txt]
-                        {:chapter title
-                         :paragraph i
-                         :text txt}))
-         vec)))
+
 
 (defn extract-paragraphs [hick]
   (let [title (title hick)
@@ -121,53 +105,17 @@
         ;; Hitta alla p-taggar i hela body-trädet
         all-paragraphs (->> (tree-seq map? :content body)
                             (filter #(= (:tag %) :p))
-                            (filter #(not (empty? (:content %)))))
-        ;; Om du vill: ta även bort tomma strängar i p-taggar
-        ]
+                            (filter #(not (empty? (:content %)))))]
     (->> all-paragraphs
          (map #(->> (flatten-text %)
                     clean-text))
-         (remove str/blank?)
+         (remove string/blank?)
          (map-indexed (fn [i txt]
                         {:chapter title
                          :paragraph i
                          :text txt}))
          vec)))
 
-
-#_(defn extract-paragraphs [hick]
-    (let [title (title hick)
-          segments (:content (body-node hick))
-          cleaned (remove #(and (map? %) (= (:tag %) :h2)) segments)
-          paragraph-groups (partition-by is-empty-paragraph? cleaned)
-          text-groups (remove #(is-empty-paragraph? (first %)) paragraph-groups)]
-
-      (->> text-groups
-           (map #(->> (map flatten-text %)
-                      (apply str)
-                      clojure.string/trim
-                      replaceline-with-space)
-                )
-           (remove clojure.string/blank?)
-           (map #(do {:chapter title :text %2 :paragraph %1}) (range))
-           vec)))
-
-#_(defn extract-paragraphs [hick]
-  (let [title (title hick)
-        segments (:content (body-node hick))
-        cleaned (remove #(and (map? %) (= (:tag %) :h2)) segments)
-        paragraph-groups (partition-by is-empty-paragraph? cleaned)
-        text-groups (remove #(is-empty-paragraph? (first %)) paragraph-groups)]
-
-    (->> text-groups
-         (map #(->> (map flatten-text %)
-                    (apply str)
-                    clojure.string/trim
-                    replaceline-with-space)
-              )
-         (remove clojure.string/blank?)
-         (map #(do {:chapter title :text %2 :paragraph %1}) (range))
-         vec)))
 
 (defn path [dir & steps]
   (Paths/get dir (into-array String steps)))
@@ -200,8 +148,8 @@
 
 (defn tokenize [str skips]
   (->> (strings/split-spaces str)
-       (map #(str/replace % non-letter-or-digits ""))
-       (map str/lower-case)
+       (map #(string/replace % non-letter-or-digits ""))
+       (map string/lower-case)
        (filter (complement skips))
        (filter (complement empty?))))
 
@@ -234,29 +182,7 @@
        hickory/as-hickory
        extract-paragraphs))
 
-(comment
-  #_(for [x (range 37 38)]
-      (spit (str x ".xhtml") (with-out-str
-                               (let [title (str "Chapter " (- x 1))]
-                                 (println (str "<?xml version=\"1.0\" encoding=\"utf-8\"?>
-<!DOCTYPE html PUBLIC \"-//W3C//DTD XHTML 1.1//EN\"
-  \"http://www.w3.org/TR/xhtml11/DTD/xhtml11.dtd\">
 
-<html xmlns=\"http://www.w3.org/1999/xhtml\">
-<head>
-  <title>" title "</title>
-</head>
-
-<body>"))
-                                 (doseq [a (->> (parse-file (str "The Hitchhiker's Guide to the Galaxy/Section00" x ".xhtml"))
-                                                (map #(str "<p>" (:text %) "</p>")))]
-                                   (println a))
-                                 (println "</body></html>")))))
-
-  (parse-file "Pride and Prejudice/Austen_Jane_Pride_and_Prejudice-5.html")
-  (parse-file "Alice in Wonderland/1884162634288874370_11-h-1.htm.xhtml")
-                                        ;
-  )
 (defn- parse-book [directory]
   (->> (list-xhtml-files directory)
        (mapcat parse-file)
@@ -300,7 +226,7 @@
 (defn load-books
   [debug-print]
   (debug-print "Loading books!!")
-  (let [books-dir (File. (.toFile (ensure-books-dir! debug-print)) "books")]
+  (let [books-dir (.toFile (ensure-books-dir! debug-print))]
     (->> (list-dirs books-dir)
          (map #(load-book books-dir % debug-print))
          (merge-books))))
@@ -319,7 +245,7 @@
   nil)
 
 (defn search [q debug]
-  (println "Searching")
+  (println "Searching" q)
   (let [r (search/search (book debug) q)]
     (println "Done")
     r))
@@ -347,7 +273,7 @@
     (sort-by
      (fn [p]
        (let [tokens (set (:tokens p))]
-         (- (count (clojure.set/intersection tokens query-set)))))
+         (- (count (set/intersection tokens query-set)))))
      deduped)))
 
 

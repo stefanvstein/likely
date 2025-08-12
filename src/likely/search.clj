@@ -52,7 +52,7 @@
    {:algo :fonetic-distance :query word :length 1 :points 1}
    {:algo :start-with-fonetic :query word :points 9}
    {:algo :contains :query word :min-word-length 5 :min-match-word-length 7 :points 150}
-{:algo :contains :query word :min-word-length 4 :min-match-word-length 5 :points 100}])
+   {:algo :contains :query word :min-word-length 4 :min-match-word-length 5 :points 100}])
 
 (defn searches-for-word [word]
   (let [length (count word)]
@@ -71,12 +71,12 @@
   [msg expr]
   `(let [start# (. System (currentTimeMillis))
          ret# ~expr]
-     (println (str ~msg " in : "  (- (. System (currentTimeMillis)) start#) " msecs"))
+     (println (str ~msg " in: "  (- (. System (currentTimeMillis)) start#) " ms"))
      ret#))
 
 (defn search-with-spec [{:keys [algo query length min-word-length min-match-word-length] :as _search-spec}
                         {:keys [ref mra] :as _data}]
-  (t (str algo " " query)
+  (t (str algo " \"" query "\"")
         (condp = algo
           :exact (exact/find-exact query ref)
           :exact-start (exact/find-starts-with query ref)
@@ -135,7 +135,7 @@
 
 (defn update-extra-for-common [m points]
   (let [extras (words-with-common-group (keys m) (fn [k] (:refs (m k))))]
-    
+    (println (count extras) "out of" (count (keys m)) "raised as common")
     (reduce (fn [a v]
               (update a v #(assoc % :points (+ points (:points % 0)))))
             m
@@ -145,15 +145,9 @@
     (perform-searches s data)))
 
 (defn search [data question]
-  (let [
-        r (do-search data question)
-        
-        ;; Hmm give extra points fort those that have same ref
-        
+  (let [r (do-search data question)
         with-extra (update-extra-for-common r 1)
-        
-        a (as-value-and-points with-extra)
-        ]
+        a (as-value-and-points with-extra)]
     (map :value a)
     ))
 
