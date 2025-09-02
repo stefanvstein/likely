@@ -1,5 +1,5 @@
 (ns likely.fonetic-searches
-  (:require [likely.mra :refer [mra-codex]]
+  (:require [likely.mraplus :refer [mra-plus english-rules]]
             [likely.strings :as strings]
             [likely.distance-searches :refer [find-with-distance]]
             [likely.exact-searches :refer [not-too-long-pred ]]))
@@ -14,11 +14,13 @@
         (< i 10) (< l 17)
         :else true))))
 
+(defn mra-codex [q]
+  (mra-plus q [english-rules]))
 ;;Hitta referenser istället för nyklar med hjälp av mra. MRA träffar i sig är inte intressant
 (defn find-fonetic
   ([q mra]
    (->> (mra-codex q)
-        (mapcat #(->> 
+        (mapcat #(->>
                   (mra %)
                   (filter (size-filter (count %)))))
         (not-empty)))

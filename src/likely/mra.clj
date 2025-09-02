@@ -2,15 +2,18 @@
   (:require [clojure.math.combinatorics :refer [selections]]
             [clojure.string :as str]
             [likely.strings :refer [split-str]]
-            [likely.normalize :refer [normalize-accents]]))
+            [likely.normalize :refer [normalize]]))
 
 
 
 
 (defn- get-codex-letters [pword]
-  (let [last-3 (min 3 (- (count pword) 3))]
+  (let [last-3 (max 0 (min 3 (- (count pword) 3)))]
     (apply str (concat (take 3 pword)
                        (take-last last-3 pword)))))
+
+(comment
+  (get-codex-letters "AB"))
 
 (defn distinct-consecutive
   "Drop consecutive duplicates in sequence"
@@ -34,7 +37,7 @@
   "Drop every non alphabetical character in [word]."
   [word]
   (if-not (= word (str/replace word #"[^A-Z]" ""))
-    (str/replace (normalize-accents word) #"[^A-Z]" "")
+    (str/replace (normalize word) #"[^A-Z]" "")
     word))
 
 (defn- prep-word [word]

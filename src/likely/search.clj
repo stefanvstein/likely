@@ -65,8 +65,7 @@
   (let [search-words (words question)]
     (mapcat searches-for-word search-words)))
 
-#_(
-  (searches  "ya gola"))
+
 (defmacro t
   [msg expr]
   `(let [start# (. System (currentTimeMillis))
