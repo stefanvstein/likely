@@ -1,8 +1,41 @@
 (ns likely.mraplus
+  "A substitution based fonetic encoder optimized for scandinavian countries, 
+   knowing swedish and english, while trying to respect norwegian and danish" 
   (:require
-   [likely.normalize :as normalize]))
+   [likely.normalize :as normalize]
+   [likely.mraplusvoweldrop :refer [expand-drop-second-vowel]]))
 
+(defn- normalize-vowels
+  "Slå ihop I/E/Y→I, Å→O. Lämna övriga."
+   [^String s]
+  (let [xf (fn [^Character ch]
+             (case ch
+               \Y \U
+               \Å \O
+               \Ä \E
+               \Æ \E
+               \Ø \O
+               \Ö \O
+               ch))]
+    (apply str (map xf s))))
 
+(defn- normalize-consonants [s]
+  (let [xf (fn [^Character ch]
+             (case ch
+               \B \P
+               \D \T
+               \G \K
+               \C \X
+               \J \X
+               \M \N
+               \Z \S
+               \W nil
+               \V nil
+               \R nil
+               \H nil
+               \Q nil
+               ch))]
+    (apply str (map xf s))))
 
 (defn take-codex-letters
   "Ta upp till head-count första + upp till tail-count sista tecken, utan överlapp."
@@ -11,53 +44,69 @@
     (if (<= n head-count)
       s
       (let [head (subs s 0 head-count)
-            tail (subs s (max head-count (- n tail-count)) n)]  ; starta svansen efter huvudet
+            tail (subs s (max head-count (- n tail-count)) n)] ; starta svansen efter huvudet
         (str head tail)))))
 
 
-
-
-(defn ^boolean starts-with-at? [^String s ^long i ^String pat]
+(defn starts-with-at? [^String s i ^String pat]
   (let [m (count pat)]
     (and (<= (+ i m) (count s))
          (.regionMatches s i pat 0 m))))
 
-(defn first-hit-all
-  "Första regeln som matchar vid i i ett ruleset. Returnerar {:len L :repls [...]}, annars nil."
-  [^String s ^long i rules]
-  (some (fn [[pat repls]]
-          (when (starts-with-at? s i pat)
-            {:len (count pat) :repls (or (distinct repls) "")})) ; behåll ordning, ta bort dubbletter
+(defn first-hit
+  [^String s i rules]
+  (some (fn [{:keys [pat out at-start? at-end?]}]
+          (let [start? (= i 0)
+                end? (= (+ i (count pat)) (count s))]
+            (when (and (if (some? at-start?)
+                         (= at-start? start?) true)
+                       (if (some? at-end?)
+                         (= end? at-end?) true)
+                       (starts-with-at? s i pat))
+              {:len (count pat)
+               :translations (cond (string? out) [out]
+                                   :else out)})))
         rules))
+
+(defn extend-each-production [xs extensions]
+  (reduce (fn [out prod]
+            (reduce (fn [o r]
+                      (let [ext-prod (str prod r)]
+                        (conj o ext-prod)))
+                    out
+                    extensions))
+          [] xs))
+
+(defn expand-by-rules
+  [^String s rules]
+  (let [total-len (count s)]
+    (loop [i 0, acc [""]]
+      (if (= i total-len)
+        acc
+        (if-let [{:keys [len translations]} (first-hit s i rules)]
+          (recur (+ i len)
+                 (extend-each-production acc translations))
+          (recur (inc i)
+                 (mapv #(str % (.charAt s i)) acc)))))))
+
+(comment
+  (let [rules [{:pat "ab" :out ["1" "2"] :at-end false :at-start? true}
+               {:pat "c" :out ["4"] :at-end? false :at-start? false}]]
+    (expand-by-rules "abc" rules)))
 
 (defn dedupe-consecutive [s]
   (->> s (partition-by identity) (map first) (apply str)))
 
-(defn expand-per-ruleset-all
-  "Ett flöde per språk: första träffen per position, men alla ersättningar för den träffen."
-  [^String s rules]
-  (let [n (count s)]
-    (loop [i 0, acc ["" ]]
-      (if (= i n)
-        acc
-        (if-let [{:keys [len repls]} (first-hit-all s i rules)]
-          ;; kartesisk produkt: alla prefix × alla repls, gå fram 'len'
-          (recur (+ i len)
-                 (persistent!
-                   (reduce (fn [out p]
-                             (reduce (fn [o r] (conj! o (str p r))) out repls))
-                           (transient []) acc)))
-          ;; ingen träff: kopiera tecknet och gå 1
-          (recur (inc i)
-                 (mapv #(str % (.charAt s i)) acc)))))))
+
+(comment
+  (dedupe-consecutive "hallandllal"))
 
 (defn keep-n-of
   "Behåll högst n förekomster av tecken ur xs i s. Övriga tecken behålls alltid.
    xs kan vara en sträng eller en sekvens av tecken."
-  [n xs s]
-  (let [S   (set xs)                       ;; funkar för både sträng och seq
+  [n xs ^String s]
+  (let [S   (set xs) ;; funkar för både sträng och seq
         n   (long (max 0 n))
-        ^String s s
         len (count s)
         sb  (StringBuilder. len)]
     (loop [i 0, left n]
@@ -72,30 +121,40 @@
                 (recur (unchecked-inc i)
                        (if (contains? S ch) (dec left) left)))))))))
 
-
-
+(defn mra-plus-of-string [word rulesets  {:keys [vowels head tail norm? norm-vowels?] :or {vowels 2 head 3 tail 3 norm? true norm-vowels? true}}]
+  (->> (mapcat #(expand-by-rules word %) rulesets) ; union över språk efter expansion
+       (map #(keep-n-of vowels "AEIOUYÅÄÖÆØ" %))
+       (map dedupe-consecutive)
+       (map #(take-codex-letters % head tail))
+       (map #(if norm? (normalize-consonants %) %))
+       (map #(if norm-vowels? (normalize-vowels %) %))
+       (map dedupe-consecutive)))
 
 (defn mra-plus
   "Phonetics with expansions, keeping first 2 vowels, shortened to first and last 3"
-  [word rulesets]
-  (let [s (normalize/normalize word "åäö")]
-    (->> rulesets
-         (mapcat #(expand-per-ruleset-all s %)) ; union över språk efter expansion
-
-         (map #(keep-n-of 2 "AEIOUYÅÄÖ" %))
-         (map dedupe-consecutive)
-         (map #(take-codex-letters % 3 3))
-
-         set)))
-
-(defn phonetic [word rulesets]
-  (let [s (normalize/normalize word "åäö")]
-    (->> rulesets
-         (mapcat #(expand-per-ruleset-all s %)) ; union över språk efter expansion
-         (map dedupe-consecutive)
+  [word rulesets & settings]
+  (let [s (normalize/normalize word "ÅÄÖÆØ")]
+    (->> (expand-drop-second-vowel s)
+         (mapcat #(mra-plus-of-string % rulesets settings))
+         (set)
          )))
 
-#_(comment 
+(defn phonetic-of-string [rulesets s]
+  (->> rulesets
+       (mapcat #(expand-by-rules s %)) ; union över språk efter expansion
+       (map dedupe-consecutive)))
+
+(defn phonetic [word rulesets]
+  (let [s (normalize/normalize word "ÅÄÖÆØ")]
+    (->> (expand-drop-second-vowel s)
+         (mapcat #(phonetic-of-string rulesets %))
+         (set))))
+
+(comment
+  (into #{} [1 2 3]))
+
+
+#_(comment
     A ≈ IPA [a], [ɑ] (kort/långt a, sv. mat)
     E ≈ IPA [e], [ɛ] (kort/långt e, kort ä)
     I ≈ IPA [i] (sv. vit)
@@ -103,225 +162,212 @@
     U ≈ IPA [ʉ] (sv. hus) och ibland [u] (eng. boot)
     Y ≈ IPA [y] (sv. ny)
     Å ≈ IPA [oː], [ɔː] (sv. båt)
-    Ä ≈ IPA [æ], [ɛː] (sv. är, eng. cat ~ lång ä)
+    Ä ≈ IPA [æ], [ɛː] (sv. är, eng. cat ~lång ä)
     Ö ≈ IPA [ø], [œ] (sv. röd)
 
-    B, D, F, G, K, L, M, N, P, R, S, T, V, Y – direkt svensk mappning.
+    B, D, F, G, K, L, M, N, P, R, S, T, V  – direkt svensk mappning.
 
-    C = tje-ljud ([ɕ], [t͡ɕ], [ɧ], [ʃ], [x] )
-    X = sch-ljud (, engelska sh i skotska loch eller svenska skepp)
+    C = tje-ljud ([ɕ], [t͡ɕ], [ɧ], [ʃ], [x])
+    X = sch-ljud (engelska sh i skotska loch eller svenska skepp)
     J = tonande tje-ljud som i engelska dodge)
 
 (def english-rules
-  [;; längsta match först
-   ["TCH"  ["C"]]                         ; CHG: tje-ljud
-   ["DGE"  ["J"]]
-   ["ISL" ["AIL"]]
-   ["EIGH" ["EI"] ]
-   ["AY" ["EI"]]
-   ["AUGH" ["O" "OF" "Å"]]                ; CHG: å in som alt
-   ["OUGH" ["O" "OF" "Å" "U"]]                ; CHG: samma logik
-   ["GH"   ["F" ""]]                      ; ibland stumt
-   ["GLE" ["GLE" "GEL"]]
-   ["IPT" ["IPT" "IT"]]
-   ;; tysta initiala kluster
-   ["KN"   ["N" "KN"]]
-   ["GN"   ["N" "GN"]]
-   ["WR"   ["R"]]
-   ["PS"   ["S"]]
-   ["PN"   ["N"]]
-   ["PT"   ["T"]]
-   ["KE" ["K" "KE"]] 
-   ["MB"   ["M" "MB"]]
+  [{:pat "TCH", :out  "C"}
+   {:pat "DGE", :at-end? true :out  "J"}
+   {:pat "ISL", :out  "AIL" :at-start? true}
+   {:pat "AIL" :out "EIL"}
+   {:pat "ALE" :out "EIL"}
+   {:pat "EIGH", :out  "EI"}
+   {:pat "AY", :out ["EI"]}
+   {:pat "LAUGH" :out ["LAF"]}
+   {:pat "AUGH", :out ["Å"]}
+   {:pat "THROUGH" :out ["TRU"]}
+   {:pat "PLOUGH" :out ["PLAU"]}
+   {:pat "ROUGHT" :at-end? true :out ["RÅT"]}
+   {:pat "OUGHT" :at-end? true :out ["ÅT"]}
+   {:pat "TOUGH" :at-end? true :out ["TAF"]}
+   {:pat "ENOUGH" :at-end? true :out ["ENAF"]}
+   {:pat "QUEUE" :out  "KU"}
+   {:pat "OUGH" :at-end? true :out ["O"]}
 
-   ;; engelska 'th', 'wh'
-   ["TH"   ["T" "D"]]                     ; CHG
-   ["WH"   ["V"]]                         ; CHG: landar i sv. V
+   {:pat "OUGH", :out ["O" "OF" "Å" "U"]}
+   {:pat "GH", :out ["F" ""]}
+   {:pat "GLE", :out ["GLE" "GEL"]}
+   {:pat "IPT", :out ["IPT" "IT"]}
+  ;; tysta initiala kluster
+   {:pat "KN", :at-start? true :out ["N"]}
+   {:pat "GN", :at-start? true :out ["N"]}
+   {:pat "WR", :at-start? true :out ["R"]}
+   {:pat "PS", :at-start? true :out ["S"]}
+   {:pat "WH", :at-start? true :out ["V"]}
+   {:pat "X" :at-start? true :out ["S"]}
 
-;; sj/tj-ljud
-   ["SCH"  ["X" "SK" "C"]]
-   ["CH"   ["C" "K"]]                 ; CHG: C primär
-   ["SH"   ["C"]]
+   {:pat "PN", :out ["N"]} ;;?
+   {:pat "PT", :out ["T"]} ;;?
+   {:pat "KE", :out ["K" "KE"]} ;;?
+   {:pat "MB", :at-end? true :out ["M"]}
+   {:pat "NG" :out ["N" "NG"]}
+   {:pat "TH", :out ["T" "D"]}
 
-   ;; SC före frontvokal (science, scene)
-   ["SCE"  ["SE"]]                        ; NEW
-   ["SCI"  ["SI"]]                        ; NEW
-   ["SCY"  ["SI"]]                        ; NEW
-
-   ;; PH/CK/QU
-   ["PH"   ["F"]]
-   ["CK"   ["K"]]
-   ["QU"   ["KV" "K"]]
+;;sj/tj ljud
+   {:pat "SCH", :out ["SK" "C"]}
+   {:pat "CH", :out ["K" "C"]}
+   {:pat "SH", :out ["C"]}
+ ;; SC före frontvokal (science, scene)
+   {:pat "SCE", :out ["SE"] :at-start? true}
+   {:pat "SCI", :out ["SI"] :at-start? true}
+   {:pat "SCY", :out ["SI"] :at-start? true}
+;; PH/CK/QU
+   {:pat "PH", :out "F"}
+   {:pat "CK", :out "K"}
+   {:pat "QU", :out ["KV" "K" "K"]}
 
    ;; mjuka C/G före frontvokaler
-   ["CE"   ["SE"]]
-   ["CI"   ["SI"]]
-   ["CY"   ["SI"]]
-   ["GE"   ["IE" "E"]]
-   ["GI"   ["I" "GI"]]
-   ["GY"   ["I" "GI"]]                   ; CHG: Y → I
-
-   ;; -tion/-sion
-   ["TION" ["CON"]]                ; CHG: C eller X
-   ["SION" ["CON"]]
+   {:pat "CE", :out  "SE"}
+   {:pat "CI", :out  "SI"}
+   {:pat "CY", :out  "SI"}
+   {:pat "GE", :out ["IE" "E"]}
+   {:pat "GI", :out ["I" "GI"]}
+   {:pat "GY", :out ["I" "GI"]}
+;; -tion/-sion
+   {:pat "TION", :at-end? true :out ["CON" "TION"]}
+   {:pat "SION", :at-end? true :out ["CON"]}
 
    ;; vokalgrupper – nu strikt svenska vokaler
+   {:pat "AI", :out ["Ä" "ÄI" "E"]}
+   {:pat "AL" :out "EL"}
+   {:pat "AY", :out ["Ä" "AI" "E"]}
+   {:pat "IA", :out ["AI" "IA"]}
+   {:pat "IG", :out  "AI"}
+   {:pat "EA", :out ["E" "I"]}
+   {:pat "EE", :out  "I"}
+   {:pat "IE", :out ["E" "I"]}
+   {:pat "EI", :out ["E" "I"]}
+   {:pat "OO", :out ["O" "U"]}
+   {:pat "OU", :out ["O" "U"]}
+   {:pat "OW", :out ["OV" "Å"]}
+   {:pat "AU", :out ["Å" "O" "A"]}
+   {:pat "Y", :out  "I"}
+   {:pat "UE" :out ["U" "UE"]}
+   {:pat "U" :out ["U" "A"]}
+                                        ; eng. loch
+   {:pat "OCH", :at-end? true :out ["OX"]}
+;;Bach
+   {:pat "ACH", :at-end? true :out ["AX"]}
+;single
+   {:pat "H", :out [""]}
+   {:pat "C", :out ["K"]}
+   {:pat "Q", :out ["K"]}
+   {:pat "W", :out ["V"]}
+   {:pat "J", :out ["I"]}
+   {:pat "X", :out ["KS"]}
+;;nordiska grafem
+   {:pat "Æ", :out ["Ä"]}
+   {:pat "Ø", :out ["Ö"]}
+   {:pat "EY", :out ["EI" "I"]}
+   {:pat "I", :out ["AI" "I"] #_#_:at-start? true}
+   {:pat "E" :at-end? true, :out [""]}
 
-   ["AI"   ["Ä" "ÄI" "E"]]                     ; CHG
-   ["AY"   ["Ä" "AI" "E"]]                     ; CHG
-   ["IA"   ["AI" "IA"]]
-   ["IG"   ["AI"]]
-   ["EA"   ["E" "I"]]
-   ["EE"   ["I"]]
-   ["IE"   ["E" "I"]]
-   ["EI"   ["E" "I"]]
-   ["OO"   ["O" "U"]]
-   ["OU"   ["O" "U"]]
-   ["OW"   ["OV" "Å"]]
-   ["AU"   ["Å" "O" "A"]]                     ; NEW
-   ["Y"    ["I"]]                         ; CHG
-   ["OCH" ["OX"]]    ; eng. loch
-   ["ACH" ["AX" "AC"]]    ; eng./tyska lån: Bach, nach
-   ;; singelbokstäver
-   ["H"   [""]]
-   ["C"   ["K"]]                          ; fallback
-   ["Q"   ["K"]]
-   
-   ["W"   ["V"]]
-   ["J" ["I"]]
-   ["X" ["KS"]]
-   ;; nordiska grafem i engelska namn
-   ["Æ"   ["Ä"]]
-   ["Ø"   ["Ö"]]
-   ["EY" ["EI" "I"]]
-   ["I" ["I" "AI"]]
-   
-   ["E" ["" "E"]]
-   ;; Z
-   ["ZZ"  ["TS" "S"]]
-   ["Z"   ["S"]]])
-
+   {:pat "ZZ", :out ["TS" "S"]}
+   {:pat "Z", :out ["S"]}])
 
 (def swedish-rules
   [;; sje före främre vokaler och kluster
-   ["SKÄ" ["XÄ"]]
-   ["SKÖ" ["XÖ"]]
-   ["SKE" ["XE"]]
-   ["SKI" ["XI" "SKI"]]
-   ["SKY" ["XY" "SKY"]]
-   ["SKJ" ["X"]]
-   ["STJ" ["X" "C"]]
-   ["SCH" ["X"]]
-   ["SJ"  ["X"]]
 
-   ;; retroflex-kluster (läggs tidigt)
-   ["RS"  ["RS" "C"]]
-   ["RD"  ["D" "RD"]]
-   ["RT"  ["T" "RT"]]
-   ["RN"  ["N" "RN"]]
-   ["RL"  ["L" "RL"]]
+   {:pat "SKJ", :out ["X"]}
+   {:pat "STJ", :out ["X"]}
+   {:pat "SCH", :out ["X"]}
+   {:pat "SJ", :out ["X"]}
+
+   {:pat "SKÄ", :out ["XÄ"]}
+   {:pat "SKÖ", :out ["XÖ"]}
+   {:pat "SKE", :out ["XE"]}
+   {:pat "SKI", :out ["XI" "SKI"]}
+   {:pat "SKY", :out ["XY" "SKY"]}
+   {:pat "SKÆ" :out ["XÄ"]}
+   {:pat "SKØ" :out ["XÖ"]}
+
+;; retroflex-kluster (läggs tidigt)
+   {:pat "RS", :out ["RS" "C"]}
+   {:pat "RD", :out ["D" "RD"]}
+   {:pat "RT", :out ["T" "RT"]}
+   {:pat "RN", :out ["N" "RN"]}
+   {:pat "RL", :out ["L" "RL"]}
 
    ;; mjukgöring av G före frontvokaler (och umlaut)
-   ["GÄ"  ["IÄ" "GÄ"]]
-   ["GÖ"  ["IÖ" "GÖ"]]
-   ["GE"  ["IE" "GE"]]
-   ["GI"  ["I" "GI"]]
-   ["GY"  ["IY" "GY"]]
+   {:pat "GÄ", :out ["IÄ" "GÄ"]}
+   {:pat "GÖ", :out ["IÖ" "GÖ"]}
+   {:pat "GE", :out ["IE" "GE"]}
+   {:pat "GI", :out ["I" "GI"]}
+   {:pat "GY", :out ["IY" "GY"]}
 
    ;; tje-ljud
-   ["KÄ"  ["CÄ"]]
-   ["KÖ"  ["CÖ" "KÖ"]]
-   ["KE"  ["CE" "KE"]]
-   ["KI"  ["CI" "KI"]]
-   ["KY"  ["CY"]]
-   ["TJ"  ["C"]]
-   ["KJ"  ["C"]]
+   {:pat "KÄ", :out ["CÄ"]}
+   {:pat "KÖ", :out ["CÖ" "KÖ"]}
+   {:pat "KE", :out ["CE" "KE"]}
+   {:pat "KI", :out ["CI" "KI"]}
+   {:pat "KY", :out ["CY" "KY"]}
+
+   {:pat "TJ", :out ["C"] :at-start? true}
+   {:pat "KJ", :out ["C"] :at-start? true}
 
 ;; CH i svenska/lånord
-   ["CH"  ["X" "K" "C"]]
+
+   {:pat "CH"  :out ["X" "K"]}
+   {:pat "PH", :out ["F" "P"]}
 
    ;; “tion/sion” i lånord
-   ["TION" ["XON"]]
-   ["SION" ["XON"]]
+   {:pat "TION" :out ["XON" "TION"] :at-end? true}
+   {:pat "SION" :out ["XON"] :at-end? true}
 
    ;; tysta/halvtysta J-kluster i början
-   ["DJ"  ["I"]]
-   ["GJ"  ["I"]]
-   ["HJ"  ["I"]]
-   ["LJ"  ["I"]]
+   {:pat "DJ", :out ["I"] :at-start? true}
+   {:pat "GJ", :out ["I"] :at-start? true}
+   {:pat "HJ", :out ["I"] :at-start? true}
+   {:pat "LJ", :out ["I"] :at-start? true}
 
-   ;; nasaler och annat
-   ["NG"  ["N" "NG"]]
+;; nasaler och annat
+
+   {:pat "NG" :out ["N" "NG"]}
 
    ;; fallback och enkla kollapser
-   ["SK"  ["SK"]]
-   ["CK"  ["K"]]
-   ["C"   ["K" "S"]]
-   ["QU"  ["KV" "K"]]
-   ["W"   ["V"]]
-   ["X"   ["KS"]]
-   ["ZZ"  ["TS" "S"]]
-   ["Z"   ["S"]]
-   ["PH"  ["F" "P"]]
-   ["PS" ["PS" "S"]]
-   ["H"   [""]]
-   ["J"   ["I"]]
-   ["US" ["AS" "US"]]
-   ["RE" ["RE" "R"]]
-   ["AU" ["A"]]
-   ["G" ["G" "I"]]
-   ["O" ["O" "Å"]]
+   {:pat "CK", :out ["K"]}
+   {:pat "C", :out ["K" "S"]}
+   {:pat "Q", :out ["K"]}
+   {:pat "W", :out ["V"]}
+   {:pat "X", :at-start? true :out ["S"]} ;;xylofon xerces
+   {:pat "X", :out ["KS"]}
+   {:pat "ZZ", :out ["TS" "S"]}
+   {:pat "Z", :out ["S"]}
+   {:pat "PS", :out ["PS" "S"]}
+   {:pat "J", :out ["I"]}
+   {:pat "TS" :out ["TS" "S"]} ;;detsamma->desamma
+  
+   {:pat "AU", :out ["A"]}
+   {:pat "G", :out ["G" "I"] :at-start? true}; För aggresiv?
+   {:pat "O", :out ["O" "Å"]}
 
    ;; --- Bokstäver / digrafer (DK/NO) ---
-   ["ÄU" ["EU" "ÄU"]]
-   ["AA" ["Å" "A"]]
-   ["AE" ["Ä"]]
-   ["Æ"  ["Ä"]]
-   ["Ø"  ["Ö"]]
+   {:pat "ÄU", :out ["EU" "ÄU"]}
+   {:pat "AA", :out ["Å" "A"]}
+   {:pat "AE", :out ["Ä"]}
+   {:pat "Æ", :out ["Ä"]}
+   {:pat "Ø", :out ["Ö"]}
 
    ;; --- SK + främre vokaler inkl. Æ/Ø -> sj-ljud (DK också) ---
-   ["SKÆ" ["XÄ"]]
-   ["SKØ" ["XÖ"]]
-
+   
    ;; --- "Mjukt d" 
-
-   ["AD" ["A" "AD"]]
-   ["ED" ["E" "ED"]]
-   ["OD" ["O" "OD"]]
-   ["ÅD" ["Å" "ÅD"]]])
-
-
+   {:pat "AD" :out ["A" "AD"] :at-end? true}
+   {:pat "ED" :out ["E" "ED"] :at-end? true}
+   {:pat  "OD" :out ["O" "OD"] :at-end? true}
+   {:pat "ÅD" :out ["Å" "ÅD"] :at-end? true}
+   {:pat "R" :at-end? true :out ["" "R"]}
+   {:pat "H", :out [""]}]                 ;Är H tyst
+  )
 
 
 (comment
-  (def ord ["djur" "färd" "karta" "barn" "första" "whisky" "fax" "taxfree" "gäng" "köra" "skön" "göra"
-            "sjuk" "sjö" "skepp" "sked" "skjorta" "skjutsa" "skjuta" "skjuts" "stjärna" "stjäl"
-            "tjej" "tjock" "tjur" "tjata" "kyrka" "kjol" "kära" "kärlek" "köpa" "köra"
-            "champinjon" "choklad" "champagne" "charter" "chaufför" "chef" "schema" "schampo" "schack" "schäfer"
-            "ljus" "hjul" "hjärna" "hjärta" "hjälp" "djur" "ljuga" "ljud" "göra" "gärna"
-            "barn" "färd" "karta" "pärla" "första" "storslagen" "fjärde" "ord" "bord" "vård"
-            "pizza" "fuzz" "jazz" "zebra" "zon" "zero" "whisky" "whist" "quorn" "quiz"
-            "fysik" "fabrik" "fenomen" "filosofi" "fantasi" "fara" "vacker" "vinter" "väder" "väg"
-            "ångest" "äventyr" "ärlig" "ärende" "öga" "öppna" "över" "önska" "år" "åska"
-            "blomma" "blad" "båt" "bok" "bänk" "byxor" "boll" "banan" "band" "berg"
-            "sommar" "vinter" "höst" "vår" "sol" "måne" "stjärnor" "moln" "regn" "snö"
-            "språk" "skriva" "skratta" "skrik" "skydd" "skydda" "skyll" "skyddsrum" "skyddsväst" "skymning"
-            "förklara" "förstå" "försvinna" "förlora" "förlåta" "försvara" "försöka" "förvåna" "förvänta" "förbjuda"])
-  (def words ["rain" "said" "giant" "bridge" "dodge" "cheap" "ship" "loch" "Bach" "though" "through" "laugh"
-              "show" "mission" "station" "vision" "you" "yellow" "jam" "jungle" "John" "jeans" "chair"
-              "chop" "choir" "psychology" "gnome" "knight" "receipt" "pneumonia" "tsunami" "again"
-              "chop" "sheep" "shop" "shower" "shame" "shore" "shrimp" "shrink" "shrub"
-              "tough" "enough" "caught" "daughter"
-              "nation" "decision" "precision" "explosion" "illusion" "fusion" "confusion"
-              "your" "yours" "yesterday" "yes" "youth" "young" "yolk" "yawn"
-              "January" "June" "July" "joke" "joy" "justice"
-              "knife" "knee" "knew" "know" "knowledge" "gnat"
-              "sword" "island" "hour" "honest" "honor" "heir" "eight" "weight"
-              "seize" "weird" "leisure" "measure" "treasure" "pleasure" "azure" "genre" "machine" "chef"
-              "school" "scheme" "schedule" "chaos" "character" "chemist" "chorus" "echo" "architect" "anchor"
-              "photo" "phone" "phase" "physical" "elephant" "graph" "sphere" "alphabet" "nephew" "Stephen"
-              "fizz" "buzz" "amazing" "zero" "zebra" "whale" "whisper" "what" "when" "money"])
-  (map (fn [x] [x (phonetic x [swedish-rules])])  ord)
-  (map (fn [x] [x (phonetic x [english-rules])])  words)
-  (map (fn [x] [x (phonetic x [swedish-rules english-rules])]) (concat ord words))
-  )
+  
+  
+
+ )
