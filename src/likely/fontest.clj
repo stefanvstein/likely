@@ -72,4 +72,5 @@
        (mapv #(let [en (str/join ", " (phonetic % [english-rules]))
                     se (str/join ", " (phonetic % [swedish-rules]))]
                 (str % " -> en: ("  en ")  se: (" se ")\n")))
-       println))
+       println)
+(map #(phonetic % [english-rules]) ["Can" "I" "hide" "you" "behind" "bars"]))

@@ -189,12 +189,16 @@
    {:pat "ENOUGH" :at-end? true :out ["ENAF"]}
    {:pat "QUEUE" :out  "KU"}
    {:pat "OUGH" :at-end? true :out ["O"]}
-
+   {:pat "URE" :out ["Ö" "ER"] :at-end? true}
    {:pat "OUGH", :out ["O" "OF" "Å" "U"]}
+   {:pat "YACHT", :out "IÅT"}
    {:pat "GH", :out ["F" ""]}
    {:pat "GLE", :out ["GLE" "GEL"]}
    {:pat "IPT", :out ["IPT" "IT"]}
-  ;; tysta initiala kluster
+   {:pat "PLY" :at-end? true :out ["PLAI"]}
+   {:pat "JULY" :at-end? true :out ["IULAI"]}
+   {:pat "LY" :at-end? true :out ["LI"]}
+   ;; tysta initiala kluster
    {:pat "KN", :at-start? true :out ["N"]}
    {:pat "GN", :at-start? true :out ["N"]}
    {:pat "WR", :at-start? true :out ["R"]}
@@ -208,8 +212,20 @@
    {:pat "MB", :at-end? true :out ["M"]}
    {:pat "NG" :out ["N" "NG"]}
    {:pat "TH", :out ["T" "D"]}
+;; slutlig tystnad
+   {:pat "NEW" :out "NU"}
+   {:pat "DEW" :out "DU"}
+   {:pat "TEW" :out "TU"}
+   {:pat "LEW" :out "LU"}
 
-;;sj/tj ljud
+   {:pat "EW" :out "IU"}
+   {:pat "XES" :at-end? true :out "SIS"}
+   {:pat "SES" :at-end? true :out "SIS"}
+   {:pat "ZES" :at-end? true :out "SIS"}
+   {:pat "SHES" :at-end? true :out "CIS"}
+   {:pat "CHES" :at-end? true :out "CIS"}
+   {:pat "ES" :at-end? true :out "S"}
+   ;;sj/tj ljud
    {:pat "SCH", :out ["SK" "C"]}
    {:pat "CH", :out ["K" "C"]}
    {:pat "SH", :out ["C"]}
@@ -226,16 +242,20 @@
    {:pat "CE", :out  "SE"}
    {:pat "CI", :out  "SI"}
    {:pat "CY", :out  "SI"}
-   {:pat "GE", :out ["IE" "E"]}
+   {:pat "GE", :at-start? false :out ["GE" "J" "IE" "E"]}
+   {:pat "GE", :out ["GE" "IE" "E"]}
+   {:pat "GI", :at-start? false :out ["I" "J" "GI"]}
    {:pat "GI", :out ["I" "GI"]}
-   {:pat "GY", :out ["I" "GI"]}
-;; -tion/-sion
+
+   {:pat "GY", :at-start? false :out ["I" "J"]}
+   {:pat "GY", :out "I"}
+   ;; -tion/-sion
    {:pat "TION", :at-end? true :out ["CON" "TION"]}
    {:pat "SION", :at-end? true :out ["CON"]}
-
+   {:pat "TS" :at-start? true :out "S"}
    ;; vokalgrupper – nu strikt svenska vokaler
    {:pat "AI", :out ["Ä" "ÄI" "E"]}
-   {:pat "AL" :out "EL"}
+   {:pat "AL" :out ["EL" "AL"]}
    {:pat "AY", :out ["Ä" "AI" "E"]}
    {:pat "IA", :out ["AI" "IA"]}
    {:pat "IG", :out  "AI"}
@@ -244,9 +264,15 @@
    {:pat "IE", :out ["E" "I"]}
    {:pat "EI", :out ["E" "I"]}
    {:pat "OO", :out ["O" "U"]}
-   {:pat "OU", :out ["O" "U"]}
+   {:pat "OU", :out ["O" "AU"]}
    {:pat "OW", :out ["OV" "Å"]}
    {:pat "AU", :out ["Å" "O" "A"]}
+   {:pat "AI" :out ["EI" "AI"]}
+   {:pat "AY" :out "EY"}
+   {:pat "AO" :out "EIO"}
+   {:pat "AI" :out "EI"}
+   {:pat "AR" :out "AR"}
+   {:pat "AL" :out "AL"}
    {:pat "Y", :out  "I"}
    {:pat "UE" :out ["U" "UE"]}
    {:pat "U" :out ["U" "A"]}
@@ -262,18 +288,21 @@
    {:pat "J", :out ["I"]}
    {:pat "X", :out ["KS"]}
 ;;nordiska grafem
-   {:pat "Æ", :out ["Ä"]}
-   {:pat "Ø", :out ["Ö"]}
+   {:pat "Æ", :out "Ä"}
+   {:pat "Ø", :out "Ö"}
    {:pat "EY", :out ["EI" "I"]}
    {:pat "I", :out ["AI" "I"] #_#_:at-start? true}
+   {:pat "EE" :out "I"}
    {:pat "E" :at-end? true, :out [""]}
 
    {:pat "ZZ", :out ["TS" "S"]}
-   {:pat "Z", :out ["S"]}])
+   {:pat "Z", :out "S"}
+   {:pat "R" :at-end? true :out ""}])
 
 (def swedish-rules
   [;; sje före främre vokaler och kluster
-
+   {:pat "GARAGE" :out "GARAC"}
+   {:pat "KONSERT" :out "KONSÄR"}
    {:pat "SKJ", :out ["X"]}
    {:pat "STJ", :out ["X"]}
    {:pat "SCH", :out ["X"]}
@@ -287,7 +316,7 @@
    {:pat "SKÆ" :out ["XÄ"]}
    {:pat "SKØ" :out ["XÖ"]}
 
-;; retroflex-kluster (läggs tidigt)
+   ;; retroflex-kluster (läggs tidigt)
    {:pat "RS", :out ["RS" "C"]}
    {:pat "RD", :out ["D" "RD"]}
    {:pat "RT", :out ["T" "RT"]}
@@ -295,23 +324,24 @@
    {:pat "RL", :out ["L" "RL"]}
 
    ;; mjukgöring av G före frontvokaler (och umlaut)
-   {:pat "GÄ", :out ["IÄ" "GÄ"]}
-   {:pat "GÖ", :out ["IÖ" "GÖ"]}
-   {:pat "GE", :out ["IE" "GE"]}
-   {:pat "GI", :out ["I" "GI"]}
-   {:pat "GY", :out ["IY" "GY"]}
-
+   {:pat "GÄ", :out "IÄ"}
+   {:pat "GÖ", :out "IÖ"}
+   {:pat "GE", :out "IE"}
+   {:pat "GI", :out "I"}
+   {:pat "GY", :out "IY"}
+   {:pat "LGJ", :out "LI"}
+   {:pat "GJ" :at-start? true :out "I"}
    ;; tje-ljud
-   {:pat "KÄ", :out ["CÄ"]}
-   {:pat "KÖ", :out ["CÖ" "KÖ"]}
-   {:pat "KE", :out ["CE" "KE"]}
-   {:pat "KI", :out ["CI" "KI"]}
-   {:pat "KY", :out ["CY" "KY"]}
+   {:pat "KÄ", :out "CÄ"}
+   {:pat "KÖ", :out "CÖ"}
+   {:pat "KE", :out "CE"}
+   {:pat "KI", :out "CI"}
+   {:pat "KY", :out "CY"}
 
    {:pat "TJ", :out ["C"] :at-start? true}
    {:pat "KJ", :out ["C"] :at-start? true}
 
-;; CH i svenska/lånord
+   ;; CH i svenska/lånord
 
    {:pat "CH"  :out ["X" "K"]}
    {:pat "PH", :out ["F" "P"]}
@@ -326,12 +356,21 @@
    {:pat "HJ", :out ["I"] :at-start? true}
    {:pat "LJ", :out ["I"] :at-start? true}
 
-;; nasaler och annat
+   ;; nasaler och annat
 
    {:pat "NG" :out ["N" "NG"]}
 
    ;; fallback och enkla kollapser
    {:pat "CK", :out ["K"]}
+   {:pat "CI" :out "SI"}
+   {:pat "CE" :out "SE"}
+   {:pat "CY" :out "SY"}
+   {:pat "CÄ" :out "SÄ"}
+   {:pat "CÖ" :out "SÖ"}
+   {:pat "CA" :out "KA"}
+   {:pat "CO" :out "KO"}
+   {:pat "CU" :out "KU"}
+   {:pat "CÅ" :out "KÅ"}
    {:pat "C", :out ["K" "S"]}
    {:pat "Q", :out ["K"]}
    {:pat "W", :out ["V"]}
@@ -342,27 +381,32 @@
    {:pat "PS", :out ["PS" "S"]}
    {:pat "J", :out ["I"]}
    {:pat "TS" :out ["TS" "S"]} ;;detsamma->desamma
-  
+
    {:pat "AU", :out ["A"]}
-   {:pat "G", :out ["G" "I"] :at-start? true}; För aggresiv?
+   {:pat "G", :out ["G" "I"] :at-start? true} ; För aggresiv?
+   {:pat "KO", :out "KO"}
+   {:pat "GO", :out "GO"}
+   {:pat "LO", :out "LO"}
+   
    {:pat "O", :out ["O" "Å"]}
 
    ;; --- Bokstäver / digrafer (DK/NO) ---
    {:pat "ÄU", :out ["EU" "ÄU"]}
    {:pat "AA", :out ["Å" "A"]}
-   {:pat "AE", :out ["Ä"]}
-   {:pat "Æ", :out ["Ä"]}
-   {:pat "Ø", :out ["Ö"]}
+   {:pat "AE", :out "Ä"}
+   {:pat "Æ", :out "Ä"}
+   {:pat "Ø", :out "Ö"}
+   {:pat "E" :at-end? true :out ["E", ""]}
 
    ;; --- SK + främre vokaler inkl. Æ/Ø -> sj-ljud (DK också) ---
-   
+
    ;; --- "Mjukt d" 
    {:pat "AD" :out ["A" "AD"] :at-end? true}
    {:pat "ED" :out ["E" "ED"] :at-end? true}
    {:pat  "OD" :out ["O" "OD"] :at-end? true}
    {:pat "ÅD" :out ["Å" "ÅD"] :at-end? true}
    {:pat "R" :at-end? true :out ["" "R"]}
-   {:pat "H", :out [""]}]                 ;Är H tyst
+   {:pat "H", :out [""]}]               ;Är H tyst
   )
 
 
